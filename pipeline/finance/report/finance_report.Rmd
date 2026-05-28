@@ -1,0 +1,546 @@
+---
+title: "금융동향 내부 보고서"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+author: "금융동향 분석 파이프라인"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: false
+    fig_width: 9
+    fig_height: 4
+    df_print: paged
+    css: "../../../pipeline/employment/report/report_style.css"
+    self_contained: true
+params:
+  run_id: ""
+  period_start: ""
+  period_end: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  out.width = "90%",
+  dpi = 120
+)
+
+# Docker: finance_analysis/  |  로컬: analysis/
+analysis_config <- if (file.exists("../finance_analysis/00_config.R")) {
+  "../finance_analysis/00_config.R"
+} else {
+  "../analysis/00_config.R"
+}
+source(analysis_config)
+
+if (nchar(params$run_id)       > 0) RUN_ID       <- params$run_id
+if (nchar(params$period_start) > 0) PERIOD_START <- params$period_start
+if (nchar(params$period_end)   > 0) PERIOD_END   <- params$period_end
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(scales)
+  library(lubridate)
+  library(glue)
+  library(knitr)
+  library(kableExtra)
+  library(patchwork)
+  library(stringr)
+  library(purrr)
+})
+
+# ── 정부 보고서 테마 (employment_report.Rmd 동일) ────────────────────────────
+theme_gov <- function(base_size = 11) {
+  theme_bw(base_size = base_size) +
+  theme(
+    plot.title         = element_text(face = "bold", size = base_size + 1,
+                                      hjust = 0.5, margin = margin(b = 6)),
+    plot.subtitle      = element_text(size = base_size - 1, hjust = 0.5,
+                                      color = "grey40"),
+    axis.title         = element_text(size = base_size - 1),
+    axis.text          = element_text(size = base_size - 2, color = "black"),
+    axis.text.x        = element_text(lineheight = 0.85),
+    axis.ticks         = element_line(color = "black", linewidth = 0.3),
+    panel.border       = element_rect(color = "black", linewidth = 0.4),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey88", linewidth = 0.3),
+    panel.grid.minor   = element_blank(),
+    panel.background   = element_rect(fill = "white"),
+    legend.position    = "bottom",
+    legend.title       = element_blank(),
+    legend.key.width   = unit(1.5, "cm"),
+    legend.key.height  = unit(0.4, "cm"),
+    legend.text        = element_text(size = base_size - 2),
+    legend.background  = element_rect(color = "grey70", linewidth = 0.3),
+    legend.margin      = margin(3, 6, 3, 6),
+    strip.text         = element_text(face = "bold", size = base_size - 1),
+    strip.background   = element_rect(fill = "grey92", color = "grey60")
+  )
+}
+
+fmt_x_ym <- function(breaks_by = "2 months") {
+  scale_x_date(date_breaks = breaks_by, date_labels = "%Y\n%m")
+}
+
+COL_BLK  <- "black"
+COL_BLUE <- "#3366CC"
+COL_RED  <- "#CC3333"
+COL_GREY <- "#888888"
+COL_ORG  <- "#E07800"
+COL_GRN  <- "#336633"
+
+fmt_pct <- function(x, d = 1) paste0(ifelse(x >= 0, "+", ""), round(x, d), "%")
+fmt_pp  <- function(x, d = 2) paste0(ifelse(x >= 0, "+", ""), round(x, d), "%p")
+fmt_val <- function(x, d = 2) formatC(round(x, d), format = "f", digits = d, big.mark = ",")
+
+# ── BQ 로드 헬퍼 ─────────────────────────────────────────────────────────────
+bq_safe <- function(tbl, filter_run_id = TRUE) {
+  sql <- if (filter_run_id) {
+    glue("SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.{tbl}` WHERE run_id = '{RUN_ID}'")
+  } else {
+    glue("SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.{tbl}`")
+  }
+  tryCatch(
+    bq_query(sql),
+    error = function(e) {
+      message(glue("[bq_safe] {tbl} 로드 실패: {conditionMessage(e)}"))
+      NULL   # NULL 반환 → 하위에서 nrow(x) > 0 체크 필요
+    }
+  )
+}
+
+# NULL 안전 nrow 헬퍼
+safe_nrow <- function(x) if (is.null(x)) 0L else nrow(x)
+
+# NULL → 빈 tibble 변환 (컬럼 무관)
+ensure_df <- function(x) if (is.null(x)) tibble() else x
+
+# ── 분석 테이블 로드 ─────────────────────────────────────────────────────────
+trend_series  <- ensure_df(bq_safe("fin_analysis_trend_series"))
+trend_summary <- ensure_df(bq_safe("fin_analysis_trend_summary"))
+spread_series <- ensure_df(bq_safe("fin_analysis_kr_us_spread"))
+spread_summary <- ensure_df(bq_safe("fin_analysis_kr_us_summary"))
+
+# period_date 변환
+if (nrow(trend_series) > 0 && "period_date" %in% names(trend_series))
+  trend_series <- trend_series |> mutate(period_date = as.Date(period_date))
+if (nrow(spread_series) > 0 && "period_date" %in% names(spread_series))
+  spread_series <- spread_series |> mutate(period_date = as.Date(period_date))
+
+# ── 최신 스냅샷 헬퍼 ─────────────────────────────────────────────────────────
+snap <- function(var) {
+  if (nrow(trend_summary) == 0 || !"variable_name" %in% names(trend_summary)) return(NULL)
+  trend_summary |> filter(variable_name == var)
+}
+
+snap_val <- function(var, field = "latest_value", default = NA_real_) {
+  s <- snap(var)
+  if (is.null(s) || nrow(s) == 0) return(default)
+  v <- s[[field]][1]
+  if (is.null(v) || length(v) == 0) return(default)
+  v
+}
+
+latest_period_label <- PERIOD_END
+```
+
+---
+
+> **분석 기간**: `r PERIOD_START` ~ `r PERIOD_END`  |  **run_id**: `r RUN_ID`
+
+---
+
+# 1. 금융시장 현황 요약
+
+```{r situation-text}
+kr_rate  <- snap_val("kr_base_rate")
+us_rate  <- snap_val("us_fed_funds_rate")
+kr_cpi_v <- snap_val("kr_cpi")
+kr_usd_v <- snap_val("kr_usd_rate")
+kr_m2_v  <- snap_val("kr_m2")
+
+if (nrow(spread_summary) > 0 && "spread_name" %in% names(spread_summary)) {
+  sp_policy  <- spread_summary |> filter(spread_name == "spread_policy_rate")
+  spread_val <- if (nrow(sp_policy) > 0) sp_policy$latest_spread[1] else NA_real_
+  spread_dir <- if (nrow(sp_policy) > 0) sp_policy$spread_direction[1] else "-"
+} else {
+  spread_val <- NA_real_
+  spread_dir <- "-"
+}
+
+kr_rate_mom <- snap_val("kr_base_rate", "mom_chg")
+us_rate_mom <- snap_val("us_fed_funds_rate", "mom_chg")
+```
+
+> `r latest_period_label` 기준 금융시장 현황 요약.
+> **한국 기준금리** `r if(!is.na(kr_rate)) paste0(fmt_val(kr_rate,2), "%") else "-"` /
+> **미국 기준금리** `r if(!is.na(us_rate)) paste0(fmt_val(us_rate,2), "%") else "-"` /
+> **한미 스프레드** `r if(!is.na(spread_val)) paste0(fmt_pp(spread_val), " (", spread_dir, ")") else "-"` /
+> **원달러 환율** `r if(!is.na(kr_usd_v)) paste0(fmt_val(kr_usd_v,0), "원") else "-"` /
+> **한국 CPI** `r if(!is.na(kr_cpi_v)) fmt_val(kr_cpi_v,1) else "-"`
+
+---
+
+# 2. 금리 동향
+
+## 2.1 한국 기준금리 및 시장금리 추이
+
+```{r rate-kr, fig.height=4.5}
+rate_vars_kr <- c("kr_base_rate", "kr_govbond_3y", "kr_govbond_10y", "kr_cd_91d")
+rate_labels_kr <- c(
+  kr_base_rate  = "기준금리",
+  kr_govbond_3y = "국고채 3년",
+  kr_govbond_10y = "국고채 10년",
+  kr_cd_91d     = "CD 91일"
+)
+cols_kr <- c(COL_BLK, COL_BLUE, COL_RED, COL_ORG)
+names(cols_kr) <- rate_labels_kr
+
+df_kr <- trend_series |>
+  filter(variable_name %in% rate_vars_kr, !is.na(value)) |>
+  mutate(label = recode(variable_name, !!!rate_labels_kr))
+
+if (nrow(df_kr) > 0) {
+  ggplot(df_kr, aes(x = period_date, y = value, color = label, linetype = label)) +
+    geom_line(linewidth = 0.75) +
+    scale_color_manual(values = cols_kr) +
+    scale_linetype_manual(values = c("solid","solid","dashed","dotted")) +
+    fmt_x_ym("3 months") +
+    labs(title = "한국 기준금리 및 시장금리 추이",
+         subtitle = glue("{PERIOD_START} ~ {PERIOD_END}"),
+         x = NULL, y = "(%)") +
+    theme_gov()
+} else {
+  message("금리 데이터 없음")
+}
+```
+
+## 2.2 미국 기준금리 및 국채 수익률
+
+```{r rate-us, fig.height=4}
+rate_vars_us <- c("us_fed_funds_rate", "us_treasury_2y", "us_treasury_10y")
+rate_labels_us <- c(
+  us_fed_funds_rate = "연방기금금리",
+  us_treasury_2y    = "국채 2년",
+  us_treasury_10y   = "국채 10년"
+)
+cols_us <- c(COL_BLK, COL_RED, COL_BLUE)
+names(cols_us) <- rate_labels_us
+
+df_us <- trend_series |>
+  filter(variable_name %in% rate_vars_us, !is.na(value)) |>
+  mutate(label = recode(variable_name, !!!rate_labels_us))
+
+if (nrow(df_us) > 0) {
+  ggplot(df_us, aes(x = period_date, y = value, color = label, linetype = label)) +
+    geom_line(linewidth = 0.75) +
+    scale_color_manual(values = cols_us) +
+    scale_linetype_manual(values = c("solid","dashed","solid")) +
+    fmt_x_ym("3 months") +
+    labs(title = "미국 기준금리 및 국채 수익률 추이",
+         subtitle = glue("{PERIOD_START} ~ {PERIOD_END}"),
+         x = NULL, y = "(%)") +
+    theme_gov()
+}
+```
+
+## 2.3 금리 지표 스냅샷
+
+```{r rate-table}
+rate_all_vars <- c("kr_base_rate","kr_govbond_3y","kr_govbond_10y","kr_cd_91d",
+                   "us_fed_funds_rate","us_treasury_2y","us_treasury_10y","us_yield_spread","us_mortgage_30y")
+
+if (nrow(trend_summary) > 0) {
+  trend_summary |>
+    filter(variable_name %in% rate_all_vars) |>
+    select(지표 = label, 기준일 = latest_period, 현재값 = latest_value,
+           전월비 = mom_chg, 전년비 = yoy_chg, 방향 = direction) |>
+    mutate(
+      현재값 = round(현재값, 2),
+      전월비 = round(전월비, 2),
+      전년비 = round(전년비, 2)
+    ) |>
+    kable(caption = "금리 지표 최신 현황 (단위: %)") |>
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = FALSE, font_size = 12) |>
+    column_spec(5, color = ifelse(
+      (trend_summary |> filter(variable_name %in% rate_all_vars))$mom_chg > 0,
+      "#CC3333", "#3366CC"
+    ))
+}
+```
+
+---
+
+# 3. 물가 동향
+
+## 3.1 한미 CPI 추이
+
+```{r cpi-trend, fig.height=4}
+cpi_vars <- c("kr_cpi","us_cpi","kr_ppi","us_pce")
+cpi_labels <- c(kr_cpi="한국 CPI", us_cpi="미국 CPI", kr_ppi="한국 PPI", us_pce="미국 PCE")
+cols_cpi <- c(COL_BLUE, COL_RED, COL_BLK, COL_ORG)
+names(cols_cpi) <- cpi_labels
+
+df_cpi <- trend_series |>
+  filter(variable_name %in% cpi_vars, !is.na(value)) |>
+  mutate(label = recode(variable_name, !!!cpi_labels))
+
+if (nrow(df_cpi) > 0) {
+  ggplot(df_cpi, aes(x = period_date, y = value, color = label, linetype = label)) +
+    geom_line(linewidth = 0.75) +
+    scale_color_manual(values = cols_cpi) +
+    scale_linetype_manual(values = c("solid","solid","dashed","dashed")) +
+    fmt_x_ym("3 months") +
+    labs(title = "한미 물가 지수 추이",
+         subtitle = glue("{PERIOD_START} ~ {PERIOD_END}"),
+         x = NULL, y = "(지수)") +
+    theme_gov()
+}
+```
+
+## 3.2 물가 지표 YoY 변화율
+
+```{r cpi-yoy, fig.height=4}
+df_cpi_yoy <- trend_series |>
+  filter(variable_name %in% c("kr_cpi","us_cpi"), !is.na(yoy_pct)) |>
+  mutate(label = recode(variable_name, kr_cpi = "한국 CPI YoY", us_cpi = "미국 CPI YoY"))
+
+if (nrow(df_cpi_yoy) > 0) {
+  ggplot(df_cpi_yoy, aes(x = period_date, y = yoy_pct, color = label, linetype = label)) +
+    geom_line(linewidth = 0.75) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = COL_GREY, linewidth = 0.5) +
+    scale_color_manual(values = c("한국 CPI YoY" = COL_BLUE, "미국 CPI YoY" = COL_RED)) +
+    scale_linetype_manual(values = c("solid","dashed")) +
+    fmt_x_ym("3 months") +
+    labs(title = "한미 CPI 전년동월대비 변화율",
+         x = NULL, y = "(%)") +
+    theme_gov()
+}
+```
+
+---
+
+# 4. 한미 스프레드 분석
+
+## 4.1 기준금리·국채 스프레드 추이
+
+```{r spread-rate, fig.height=4.5}
+spread_vars_rate <- c("spread_policy_rate","spread_bond_10y")
+spread_labels_rate <- c(
+  spread_policy_rate = "기준금리 스프레드 (KR-US)",
+  spread_bond_10y    = "국채 10년 스프레드 (KR-US)"
+)
+
+df_sp <- if (nrow(spread_series) > 0 && "spread_name" %in% names(spread_series)) {
+  spread_series |>
+    filter(spread_name %in% spread_vars_rate, !is.na(spread)) |>
+    mutate(label = recode(spread_name, !!!spread_labels_rate))
+} else tibble()
+
+if (nrow(df_sp) > 0) {
+  p_sp <- ggplot(df_sp, aes(x = period_date, y = spread, color = label, linetype = label)) +
+    geom_line(linewidth = 0.75) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = COL_GREY, linewidth = 0.4) +
+    scale_color_manual(values = c(COL_BLUE, COL_RED)) +
+    scale_linetype_manual(values = c("solid","dashed")) +
+    fmt_x_ym("3 months") +
+    labs(title = "한미 금리 스프레드 추이 (KR - US)",
+         x = NULL, y = "(%p)") +
+    theme_gov()
+
+  # 환율 보조 (있으면)
+  if ("kr_usd_rate" %in% names(df_sp) && any(!is.na(df_sp$kr_usd_rate))) {
+    df_usd <- df_sp |>
+      filter(spread_name == "spread_policy_rate", !is.na(kr_usd_rate)) |>
+      distinct(period_date, kr_usd_rate)
+
+    p_usd <- ggplot(df_usd, aes(x = period_date, y = kr_usd_rate)) +
+      geom_line(color = COL_ORG, linewidth = 0.75) +
+      fmt_x_ym("3 months") +
+      labs(title = "원달러 환율", x = NULL, y = "(원)") +
+      theme_gov()
+
+    p_sp / p_usd + plot_layout(heights = c(2, 1))
+  } else {
+    p_sp
+  }
+}
+```
+
+## 4.2 한미 CPI 갭
+
+```{r spread-cpi, fig.height=3.5}
+df_cpi_sp <- if (nrow(spread_series) > 0 && "spread_name" %in% names(spread_series)) {
+  spread_series |> filter(spread_name == "spread_cpi", !is.na(spread))
+} else tibble()
+
+if (nrow(df_cpi_sp) > 0) {
+  ggplot(df_cpi_sp, aes(x = period_date, y = spread)) +
+    geom_bar(stat = "identity",
+             fill = ifelse(df_cpi_sp$spread >= 0, COL_BLUE, COL_RED),
+             alpha = 0.8) +
+    geom_hline(yintercept = 0, linewidth = 0.4, color = COL_BLK) +
+    fmt_x_ym("3 months") +
+    labs(title = "한미 CPI 갭 (YoY% 기준, KR - US)",
+         x = NULL, y = "(%p)") +
+    theme_gov() +
+    theme(legend.position = "none")
+}
+```
+
+## 4.3 스프레드 요약
+
+```{r spread-table}
+if (nrow(spread_summary) > 0) {
+  spread_summary |>
+    select(
+      스프레드 = label,
+      기준일   = latest_period,
+      현재값   = latest_spread,
+      전월     = prev_spread,
+      `12개월평균` = spread_12m_avg,
+      `12개월최소` = spread_12m_min,
+      `12개월최대` = spread_12m_max,
+      방향     = spread_direction
+    ) |>
+    mutate(across(현재값:`12개월최대`, ~ round(.x, 2))) |>
+    kable(caption = "한미 스프레드 요약 (단위: %p)") |>
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = FALSE, font_size = 12)
+}
+```
+
+---
+
+# 5. 환율 및 유동성
+
+## 5.1 원달러 환율 추이
+
+```{r usd-trend, fig.height=3.5}
+df_usd_full <- trend_series |>
+  filter(variable_name == "kr_usd_rate", !is.na(value))
+
+if (nrow(df_usd_full) > 0) {
+  ggplot(df_usd_full, aes(x = period_date, y = value)) +
+    geom_line(color = COL_ORG, linewidth = 0.85) +
+    geom_area(fill = COL_ORG, alpha = 0.1) +
+    fmt_x_ym("3 months") +
+    labs(title = "원달러 환율 추이",
+         subtitle = glue("{PERIOD_START} ~ {PERIOD_END}"),
+         x = NULL, y = "(원/달러)") +
+    theme_gov()
+}
+```
+
+## 5.2 유동성 지표 추이 (M2·가계신용)
+
+```{r liquidity, fig.height=4}
+liq_vars <- c("kr_m2","kr_household_credit")
+liq_labels <- c(kr_m2="M2 통화량", kr_household_credit="가계신용 잔액")
+
+df_liq <- trend_series |>
+  filter(variable_name %in% liq_vars, !is.na(value)) |>
+  mutate(label = recode(variable_name, !!!liq_labels))
+
+if (nrow(df_liq) > 0) {
+  # 두 지표 단위 상이 → 개별 패널
+  ggplot(df_liq, aes(x = period_date, y = value)) +
+    geom_line(color = COL_BLUE, linewidth = 0.75) +
+    geom_area(fill = COL_BLUE, alpha = 0.08) +
+    facet_wrap(~ label, scales = "free_y", ncol = 2) +
+    fmt_x_ym("6 months") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(title = "유동성 지표 추이", x = NULL, y = "(십억원)") +
+    theme_gov()
+}
+```
+
+---
+
+# 6. 부동산 금융
+
+## 6.1 주택매매가격지수
+
+```{r house-price, fig.height=4}
+hp_vars <- c("kr_house_price_sale","us_cs_hpi")
+hp_labels <- c(kr_house_price_sale="한국 주택매매가격지수", us_cs_hpi="미국 케이스실러 HPI")
+
+df_hp <- trend_series |>
+  filter(variable_name %in% hp_vars, !is.na(value)) |>
+  mutate(label = recode(variable_name, !!!hp_labels))
+
+if (nrow(df_hp) > 0) {
+  ggplot(df_hp, aes(x = period_date, y = value, color = label, linetype = label)) +
+    geom_line(linewidth = 0.75) +
+    scale_color_manual(values = c(COL_BLUE, COL_RED)) +
+    scale_linetype_manual(values = c("solid","dashed")) +
+    facet_wrap(~ label, scales = "free_y", ncol = 2) +
+    fmt_x_ym("6 months") +
+    labs(title = "주택매매가격지수 추이",
+         x = NULL, y = "(지수)") +
+    theme_gov() +
+    theme(legend.position = "none")
+}
+```
+
+## 6.2 미국 모기지금리 추이
+
+```{r mortgage, fig.height=3.5}
+df_mg <- trend_series |>
+  filter(variable_name == "us_mortgage_30y", !is.na(value))
+
+if (nrow(df_mg) > 0) {
+  ggplot(df_mg, aes(x = period_date, y = value)) +
+    geom_line(color = COL_RED, linewidth = 0.85) +
+    fmt_x_ym("3 months") +
+    labs(title = "미국 30년 모기지금리 추이",
+         x = NULL, y = "(%)") +
+    theme_gov()
+}
+```
+
+---
+
+# 7. 전체 지표 현황표
+
+```{r full-table}
+if (nrow(trend_summary) > 0) {
+  trend_summary |>
+    arrange(group, variable_name) |>
+    select(
+      그룹     = group,
+      지표     = label,
+      단위     = unit,
+      기준일   = latest_period,
+      현재값   = latest_value,
+      전월비   = mom_chg,
+      전년비   = yoy_chg,
+      방향     = direction
+    ) |>
+    mutate(
+      현재값 = round(현재값, 2),
+      전월비 = round(전월비, 3),
+      전년비 = round(전년비, 3)
+    ) |>
+    kable(caption = "금융동향 전체 지표 현황") |>
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = TRUE, font_size = 11) |>
+    column_spec(1, bold = TRUE)
+}
+```
+
+---
+
+*본 리포트는 금융동향 분석 파이프라인이 자동 생성하였습니다.*
+*분석 기간: `r PERIOD_START` ~ `r PERIOD_END` | run_id: `r RUN_ID`*

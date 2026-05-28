@@ -1,0 +1,49 @@
+# ── 환경변수 / 자격증명 ────────────────────────────────────────────────────────
+.env
+*.key
+*_key.txt
+*.json.key
+*-service-account*.json
+*-credentials*.json
+service_account*.json
+gcloud_key*.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ── R ─────────────────────────────────────────────────────────────────────────
+.Rhistory
+.RData
+*.Rproj.user/
+*.Rproj
+
+# ── 출력물 / 렌더링 결과 ──────────────────────────────────────────────────────
+output/
+*.html
+!frontend/**/*.html
+
+# ── 로그 / 임시 파일 ──────────────────────────────────────────────────────────
+*.log
+*_log*.txt
+pipeline_log*.txt
+progress.txt
+tmpfile
+tmp/
+temp/
+
+# ── 개발용 결과 파일 ──────────────────────────────────────────────────────────
+ecos_check.json
+ecos_result.txt
+
+# ── 레퍼런스 (읽기 전용 아카이브, GitHub 불필요) ─────────────────────────────
+reference_dont_use/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

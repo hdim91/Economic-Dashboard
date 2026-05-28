@@ -1,0 +1,45 @@
+# ============================================================================
+# Dockerfile.report — RMarkdown 리포트 렌더링 컨테이너 (single-stage)
+# ============================================================================
+
+FROM rocker/verse:4.4
+
+# 시스템 패키지 + gcloud CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev libcurl4-openssl-dev libxml2-dev \
+        libgit2-dev libfontconfig1-dev \
+        libharfbuzz-dev libfribidi-dev \
+        libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
+        fonts-noto-cjk \
+        curl python3 \
+    && curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/usr/local \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/usr/local/google-cloud-sdk/bin:${PATH}"
+
+# R 패키지 설치
+RUN Rscript -e "install.packages(c('bigrquery','googleCloudStorageR','httr','jsonlite','tibble','dplyr','tidyr','lubridate','glue','purrr','zoo','tsibble','moments','tseries','forecast','prophet','ggplot2','scales','patchwork','plotly','knitr','rmarkdown','kableExtra','stringr'), repos='https://cloud.r-project.org', Ncpus=4)"
+
+WORKDIR /app
+
+# 분석 스크립트
+COPY analysis/ analysis/
+
+# 리포트 파일
+COPY report/employment_report.Rmd  report/
+COPY report/report_style.css       report/
+COPY report/render_report.R        report/
+
+# 출력 디렉토리
+RUN mkdir -p /app/report/output
+
+ENV REPORT_OUT_DIR=/app/report/output \
+    REPORT_FORMAT=html \
+    REPORT_UPLOAD_GCS=false
+
+WORKDIR /app
+
+COPY report/run_all.sh run_all.sh
+RUN chmod +x run_all.sh
+
+ENTRYPOINT ["/bin/bash", "run_all.sh"]

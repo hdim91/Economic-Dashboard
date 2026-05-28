@@ -1,0 +1,908 @@
+---
+title: "고용동향 내부 보고서"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+author: "고용동향 분석 파이프라인"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: false
+    fig_width: 9
+    fig_height: 4
+    df_print: paged
+params:
+  run_id: ""
+  period_start: ""
+  period_end: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  out.width = "90%",
+  dpi = 120
+)
+
+source("../analysis/00_config.R")
+
+if (nchar(params$run_id)       > 0) RUN_ID       <- params$run_id
+if (nchar(params$period_start) > 0) PERIOD_START <- params$period_start
+if (nchar(params$period_end)   > 0) PERIOD_END   <- params$period_end
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(scales)
+  library(lubridate)
+  library(glue)
+  library(knitr)
+  library(kableExtra)
+  library(patchwork)
+  library(stringr)
+  library(purrr)
+})
+
+# ============================================================
+# ── 정부 보고서 스타일 테마 ───────────────────────────────────
+#    - 흰 배경, 테두리 박스, 수평 격자선만
+#    - x축 YYYY\nMM 두 줄 포맷
+#    - 범례 하단 박스형
+#    - 색상: 흑/청/적 최소 조합 + 실선/점선 구분
+# ============================================================
+theme_gov <- function(base_size = 11) {
+  theme_bw(base_size = base_size) +
+  theme(
+    plot.title         = element_text(face = "bold", size = base_size + 1,
+                                      hjust = 0.5, margin = margin(b = 6)),
+    plot.subtitle      = element_text(size = base_size - 1, hjust = 0.5,
+                                      color = "grey40"),
+    axis.title         = element_text(size = base_size - 1),
+    axis.text          = element_text(size = base_size - 2, color = "black"),
+    axis.text.x        = element_text(lineheight = 0.85),
+    axis.ticks         = element_line(color = "black", linewidth = 0.3),
+    panel.border       = element_rect(color = "black", linewidth = 0.4),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey88", linewidth = 0.3),
+    panel.grid.minor   = element_blank(),
+    panel.background   = element_rect(fill = "white"),
+    legend.position    = "bottom",
+    legend.title       = element_blank(),
+    legend.key.width   = unit(1.5, "cm"),
+    legend.key.height  = unit(0.4, "cm"),
+    legend.text        = element_text(size = base_size - 2),
+    legend.background  = element_rect(color = "grey70", linewidth = 0.3),
+    legend.margin      = margin(3, 6, 3, 6),
+    strip.text         = element_text(face = "bold", size = base_size - 1),
+    strip.background   = element_rect(fill = "grey92", color = "grey60")
+  )
+}
+
+# x축: YYYY\nMM 두 줄 포맷
+fmt_x_ym <- function(breaks_by = "2 months") {
+  scale_x_date(date_breaks = breaks_by, date_labels = "%Y\n%m")
+}
+
+# 색상 상수
+COL_BLK  <- "black"
+COL_BLUE <- "#3366CC"
+COL_RED  <- "#CC3333"
+COL_GREY <- "#888888"
+COL_ORG  <- "#E07800"
+COL_GRN  <- "#336633"
+
+# 수치 포매터
+fmt_man    <- function(x) paste0(round(abs(x), 1), "만명")
+fmt_pct    <- function(x, d=1) paste0(ifelse(x>=0,"+",""), round(x,d), "%")
+fmt_pp     <- function(x, d=2) paste0(ifelse(x>=0,"+",""), round(x,d), "%p")
+fmt_won    <- function(x) paste0(format(round(x/10000), big.mark=","), "만원")
+fmt_comma  <- function(x) format(round(x), big.mark=",")
+dir_k      <- function(x) if(is.na(x)) "변동" else if(x>0) "증가" else "감소"
+
+# ============================================================
+# ── BQ 로드 ──────────────────────────────────────────────────
+# ============================================================
+bq_safe <- function(tbl) {
+  tryCatch(
+    bq_query(glue(
+      "SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.{tbl}`
+       WHERE run_id = '{RUN_ID}'"
+    )),
+    error = function(e) tibble()
+  )
+}
+
+fs_wide <- bq_query(glue(
+  "SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.fs_wide`
+   WHERE period >= '{PERIOD_START}' AND period <= '{PERIOD_END}'
+   ORDER BY period"
+)) |> mutate(period_date = as.Date(period_date))
+
+fs_long <- bq_query(glue(
+  "SELECT period, period_date, feature_name, feature_group, unit, value
+   FROM `{BQ_PROJECT}.{BQ_DATASET}.fs_long`
+   WHERE period >= '{PERIOD_START}' AND period <= '{PERIOD_END}'
+   ORDER BY feature_name, period"
+)) |> mutate(period_date = as.Date(period_date))
+
+desc_stats   <- bq_safe("analysis_descriptive_stats")
+stl_comp     <- bq_safe("analysis_stl_components")
+stl_strength <- bq_safe("analysis_stl_strength")
+acf_summary  <- bq_safe("analysis_acf_summary")
+ccf_summary  <- bq_safe("analysis_ccf_summary")
+fc_arima     <- bq_safe("analysis_forecast_arima")
+fc_prophet   <- bq_safe("analysis_forecast_prophet")
+fc_models    <- bq_safe("analysis_forecast_models")
+yoy_summary  <- bq_safe("analysis_yoy_summary")
+
+# 기준월
+latest_period <- max(fs_wide$period)
+prev_period   <- format(as.Date(paste0(latest_period,"-01")) %m-% months(1),  "%Y-%m")
+yoy_period    <- format(as.Date(paste0(latest_period,"-01")) %m-% years(1),   "%Y-%m")
+
+# 피처별 가장 최근 유효(non-NA) 기준월 반환
+latest_valid_period <- function(feat) {
+  if (!feat %in% names(fs_wide)) return(NA_character_)
+  fs_wide |>
+    filter(!is.na(.data[[feat]])) |>
+    pull(period) |> max()
+}
+
+# 단일값 추출 — per 미지정 시 해당 피처의 최신 유효월 사용
+gv <- function(feat, per=NULL) {
+  if (is.null(per)) per <- latest_valid_period(feat)
+  if (is.na(per))   return(NA_real_)
+  v <- tryCatch(fs_wide |> filter(period==per) |> pull(any_of(feat)),
+                error=function(e) NA_real_)
+  if (length(v)==0 || all(is.na(v))) NA_real_ else v[1]
+}
+
+# 각 핵심 피처의 최신 유효 기준월 (텍스트 서술용)
+latest_emp_period  <- latest_valid_period("kr_employed_total_sa_value")
+latest_wage_period <- latest_valid_period("kr_wage_total_value")
+latest_js_period   <- latest_valid_period("kr_jobseeker_new_value")
+
+# YoY 절대차 계산 헬퍼 — 피처별 최신 유효월 기준 12개월 전과 비교
+yoy_chg <- function(feat) {
+  per <- latest_valid_period(feat)
+  if (is.na(per)) return(NA_real_)
+  per_yoy <- format(as.Date(paste0(per, "-01")) %m-% years(1), "%Y-%m")
+  cur <- gv(feat, per)
+  old <- gv(feat, per_yoy)
+  if (is.na(cur) || is.na(old)) NA_real_ else cur - old
+}
+
+# 전년동월대비 차트 표시 기간: 최신월 기준 4년 전부터
+yoy_cutoff <- as.Date(paste0(latest_period, "-01")) %m-% years(4)
+
+cat("데이터 로드 완료\n")
+```
+
+---
+
+> **분석 기간:** `r PERIOD_START` ~ `r PERIOD_END` &nbsp;|&nbsp;
+> **최신 기준월:** `r latest_period` &nbsp;|&nbsp;
+
+---
+
+# 고용시장 현황
+
+```{r situation-text, results='asis'}
+# ══════════════════════════════════════════════════════════════
+# 1~2페이지: 데이터 기반 자동 현황 텍스트 생성
+# 보고서의 Compact 불릿 스타일 재현
+# ══════════════════════════════════════════════════════════════
+
+# 피처별 최신 유효월 & 전월/전년동월 계산
+.emp_per   <- latest_valid_period("kr_employed_total_sa_value")
+.emp_prev  <- if(!is.na(.emp_per)) format(as.Date(paste0(.emp_per,"-01")) %m-% months(1), "%Y-%m") else NA_character_
+.emp_yoy   <- if(!is.na(.emp_per)) format(as.Date(paste0(.emp_per,"-01")) %m-% years(1),  "%Y-%m") else NA_character_
+
+.wage_per  <- latest_valid_period("kr_wage_total_value")
+.wage_prev <- if(!is.na(.wage_per)) format(as.Date(paste0(.wage_per,"-01")) %m-% months(1), "%Y-%m") else NA_character_
+
+.js_per    <- latest_valid_period("kr_jobseeker_new_value")
+.js_prev   <- if(!is.na(.js_per)) format(as.Date(paste0(.js_per,"-01")) %m-% months(1), "%Y-%m") else NA_character_
+
+emp_sa_cur    <- gv("kr_employed_total_sa_value", .emp_per)
+emp_sa_prev   <- gv("kr_employed_total_sa_value", .emp_prev)
+emp_sa_mom    <- if(!is.na(emp_sa_cur)&&!is.na(emp_sa_prev)) emp_sa_cur-emp_sa_prev else NA_real_
+emp_sa_yoy    <- yoy_chg("kr_employed_total_sa_value")
+emp_sa_yoy_p  <- gv("kr_employed_total_sa_yoy_pct", .emp_per)
+
+emp_male_yoy  <- yoy_chg("kr_employed_male_total_value")
+emp_fem_yoy   <- yoy_chg("kr_employed_female_total_value")
+emp_youth_yoy <- yoy_chg("kr_employed_youth_value")
+emp_mfg_yoy   <- yoy_chg("kr_employed_mfg_sa_value")
+emp_svc_yoy   <- yoy_chg("kr_employed_service_sa_value")
+emp_con_yoy   <- yoy_chg("kr_employed_construction_sa_value")
+
+.rate_per  <- latest_valid_period("kr_emprate_total_value")
+.rate_prev <- if(!is.na(.rate_per)) format(as.Date(paste0(.rate_per,"-01")) %m-% months(1), "%Y-%m") else NA_character_
+.rate_yoy  <- if(!is.na(.rate_per)) format(as.Date(paste0(.rate_per,"-01")) %m-% years(1),  "%Y-%m") else NA_character_
+
+emprate_cur   <- gv("kr_emprate_total_value", .rate_per)
+emprate_prev  <- gv("kr_emprate_total_value", .rate_prev)
+emprate_yoy_v <- gv("kr_emprate_total_value", .rate_yoy)
+emprate_mom   <- if(!is.na(emprate_cur)&&!is.na(emprate_prev)) emprate_cur-emprate_prev else NA_real_
+emprate_yoy   <- if(!is.na(emprate_cur)&&!is.na(emprate_yoy_v)) emprate_cur-emprate_yoy_v else NA_real_
+
+emprate_m_cur <- gv("kr_emprate_male_value")
+emprate_f_cur <- gv("kr_emprate_female_value")
+
+wage_cur      <- gv("kr_wage_total_value", .wage_per)
+wage_yoy_p    <- gv("kr_wage_total_yoy_pct", .wage_per)
+
+js_new_cur    <- gv("kr_jobseeker_new_value", .js_per)
+js_new_yoy_p  <- gv("kr_jobseeker_new_yoy_pct", .js_per)
+js_new_mom    <- {
+  c <- gv("kr_jobseeker_new_value", .js_per)
+  p <- gv("kr_jobseeker_new_value", .js_prev)
+  if(!is.na(c)&&!is.na(p)) c-p else NA_real_
+}
+
+us_nf_cur     <- gv("us_nonfarm_total_sa_value")
+us_nf_mom_p   <- gv("us_nonfarm_total_sa_mom_pct")
+
+# ── 섹션 1: 취업자 수 ────────────────────────────────────────
+cat("## 취업자 수\n\n")
+
+# 첫 줄: 계절조정 총괄
+if (!is.na(emp_sa_yoy) && !is.na(emp_sa_mom)) {
+  cat(glue(
+    "{ifelse(is.na(.emp_per), latest_period, .emp_per)} 취업자 수(계절조정)는 전년동월대비 **{fmt_man(emp_sa_yoy)} ",
+    "{dir_k(emp_sa_yoy)}**하였으며, 전월대비 **{fmt_man(emp_sa_mom)} {dir_k(emp_sa_mom)}**\n\n"
+  ))
+}
+
+# 성별
+if (!is.na(emp_male_yoy) && !is.na(emp_fem_yoy)) {
+  cat(glue(
+    "- 성별로는 남성이 전년동월대비 **{fmt_man(emp_male_yoy)} {dir_k(emp_male_yoy)}**, ",
+    "여성이 **{fmt_man(emp_fem_yoy)} {dir_k(emp_fem_yoy)}**\n\n"
+  ))
+}
+
+# 산업별
+ind_parts <- c()
+if (!is.na(emp_mfg_yoy))
+  ind_parts <- c(ind_parts, glue("제조업 {fmt_man(emp_mfg_yoy)} {dir_k(emp_mfg_yoy)}"))
+if (!is.na(emp_svc_yoy))
+  ind_parts <- c(ind_parts, glue("서비스업 {fmt_man(emp_svc_yoy)} {dir_k(emp_svc_yoy)}"))
+if (!is.na(emp_con_yoy))
+  ind_parts <- c(ind_parts, glue("건설업 {fmt_man(emp_con_yoy)} {dir_k(emp_con_yoy)}"))
+if (length(ind_parts) > 0)
+  cat(glue("- 산업별로는 {paste(ind_parts, collapse=', ')}\n\n"))
+
+# 고용률
+if (!is.na(emprate_cur)) {
+  emp_r_str <- glue("계절조정 고용률(15세 이상)은 **{round(emprate_cur,1)}%**")
+  if (!is.na(emprate_mom))
+    emp_r_str <- paste0(emp_r_str, glue("로 전월 대비 **{fmt_pp(emprate_mom)}**"))
+  if (!is.na(emprate_yoy))
+    emp_r_str <- paste0(emp_r_str, glue(", 전년동월대비 **{fmt_pp(emprate_yoy)}**"))
+  cat(glue("- {emp_r_str}\n\n"))
+
+  if (!is.na(emprate_m_cur) && !is.na(emprate_f_cur)) {
+    cat(glue(
+      "- 원계열 기준 남성 고용률 **{round(emprate_m_cur,1)}%**, ",
+      "여성 고용률 **{round(emprate_f_cur,1)}%**\n\n"
+    ))
+  }
+}
+
+# 청년
+if (!is.na(emp_youth_yoy)) {
+  cat(glue(
+    "- 청년층(15~29세) 취업자는 전년동월대비 **{fmt_man(emp_youth_yoy)} {dir_k(emp_youth_yoy)}**\n\n"
+  ))
+}
+
+# ── 섹션 2: 구직급여 ─────────────────────────────────────────
+cat("\n## 구직급여 분석 결과\n\n")
+if (!is.na(js_new_cur)) {
+  js_str <- glue("{ifelse(is.na(.js_per), latest_period, .js_per)} 구직급여 신규 신청자 **{fmt_comma(js_new_cur)}명**")
+  if (!is.na(js_new_yoy_p))
+    js_str <- paste0(js_str, glue("으로 전년동월대비 **{fmt_pct(js_new_yoy_p)} {dir_k(js_new_yoy_p)}**"))
+  if (!is.na(js_new_mom))
+    js_str <- paste0(js_str, glue(", 전월대비 **{fmt_comma(abs(js_new_mom))}명 {dir_k(js_new_mom)}**"))
+  cat(glue("- {js_str}\n\n"))
+}
+
+# ── 섹션 3: 임금 ─────────────────────────────────────────────
+cat("\n## 임금 현황\n\n")
+if (!is.na(wage_cur)) {
+  wage_str <- glue("상용근로자 1인 이상 사업체 월평균 전체 임금 **{fmt_won(wage_cur)}**")
+  if (!is.na(wage_yoy_p))
+    wage_str <- paste0(wage_str, glue("으로 전년동월대비 **{fmt_pct(wage_yoy_p)} {dir_k(wage_yoy_p)}**"))
+  cat(glue("- {wage_str}\n\n"))
+}
+
+# ── 섹션 4: 미국 ─────────────────────────────────────────────
+cat("\n## 미국 고용현황\n\n")
+if (!is.na(us_nf_cur)) {
+  us_str <- glue("미국 비농업 취업자(계절조정) **{fmt_comma(us_nf_cur)}천명**")
+  if (!is.na(us_nf_mom_p))
+    us_str <- paste0(us_str, glue("으로 전월대비 **{fmt_pct(us_nf_mom_p)} {dir_k(us_nf_mom_p)}**"))
+  cat(glue("- {us_str}\n\n"))
+}
+
+cat(glue("\n> 출처: KOSIS 경제활동인구조사 & 사업체노동력조사, BLS\n\n"))
+```
+
+---
+
+# 전년동월대비 취업자 현황 {.tabset}
+
+## 전체·남성·여성
+
+```{r yoy-gender, fig.height=5.5, fig.width=9}
+# ── 필요 컬럼 목록 ────────────────────────────────────────────
+.emp_cols <- c("kr_employed_total_sa_value",
+               "kr_employed_male_total_value",
+               "kr_employed_female_total_value",
+               "kr_emprate_total_value",
+               "kr_emprate_male_value",
+               "kr_emprate_female_value")
+
+# ── fs_wide에서 안전하게 로드 (없는 컬럼 → NA) ───────────────
+.base <- fs_wide |>
+  select(period, period_date, any_of(.emp_cols)) |>
+  arrange(period_date) |>
+  filter(!is.na(period_date))        # period_date NA 행 제거
+
+for (.c in .emp_cols) {
+  if (!.c %in% names(.base)) .base[[.c]] <- NA_real_
+}
+
+# ── YoY 절대차 계산 ───────────────────────────────────────────
+.yoy <- .base |>
+  mutate(
+    yoy_total  = kr_employed_total_sa_value    - dplyr::lag(kr_employed_total_sa_value,  12),
+    yoy_male   = kr_employed_male_total_value   - dplyr::lag(kr_employed_male_total_value, 12),
+    yoy_female = kr_employed_female_total_value - dplyr::lag(kr_employed_female_total_value, 12)
+  ) |>
+  filter(!is.na(yoy_total))
+
+.pd <- .yoy |> filter(period_date >= yoy_cutoff)
+
+# ── 이중축 차트 함수 ─────────────────────────────────────────
+.make_dual <- function(df, bar_col, line_col, line_lab, title_str) {
+  bv       <- df[[bar_col]]
+  lv       <- if (line_col %in% names(df)) df[[line_col]] else rep(NA_real_, nrow(df))
+  lv_ok    <- lv[!is.na(lv)]
+  use_line <- length(lv_ok) >= 2 && diff(range(lv_ok)) > 0.01
+
+  br <- range(bv, na.rm = TRUE)
+
+  p <- ggplot(df, aes(x = period_date)) +
+    geom_col(aes(y = .data[[bar_col]]),
+             fill = "grey65", color = NA, width = 25) +
+    geom_hline(yintercept = 0, linewidth = 0.6)
+
+  if (use_line) {
+    lr   <- range(lv_ok)
+    pad  <- diff(br) * 0.08
+    .sf  <- (diff(br) + 2 * pad) / diff(lr)
+    .off <- (br[1] - pad) - lr[1] * .sf
+    p <- p +
+      geom_line(
+        data = df |> mutate(.__lv = lv * .sf + .off),
+        aes(y = .__lv, color = line_lab, linetype = line_lab),
+        linewidth = 1.1, na.rm = TRUE
+      ) +
+      scale_color_manual(values = setNames(COL_BLUE, line_lab)) +
+      scale_linetype_manual(values = setNames("solid", line_lab)) +
+      scale_y_continuous(
+        name     = "전년동월차 (만명)",
+        sec.axis = sec_axis(
+          transform = eval(bquote(~ (.x - .(.off)) / .(.sf))),
+          name      = paste0(line_lab, " (%)")
+        )
+      ) +
+      theme(axis.title.y.right = element_text(color = COL_BLUE, size = 9),
+            axis.text.y.right  = element_text(color = COL_BLUE))
+  } else {
+    p <- p + scale_y_continuous(name = "전년동월차 (만명)")
+  }
+
+  p + scale_x_date(date_breaks = "6 months", date_labels = "%Y
+%m") +
+    labs(title = title_str, x = "날짜") +
+    theme_gov()
+}
+
+# ── 렌더링 ───────────────────────────────────────────────────
+if (nrow(.pd) == 0) {
+  cat("> 전년동월 비교 데이터 없음 (12개월 이상 필요)")
+} else {
+  .p1 <- .make_dual(.pd, "yoy_total",  "kr_emprate_total_value",
+                    "고용률(우)", "전체 전년동월대비 취업자 수 및 고용률")
+  .p2 <- .make_dual(.pd, "yoy_male",   "kr_emprate_male_value",
+                    "남성고용률(우)", "남성 전년동월대비 취업자 수 및 고용률")
+  .p3 <- .make_dual(.pd, "yoy_female", "kr_emprate_female_value",
+                    "여성고용률(우)", "여성 전년동월대비 취업자 수 및 고용률")
+  print(.p1 / (.p2 | .p3))
+}
+```
+
+## 산업별
+
+```{r yoy-industry, fig.height=4, fig.width=9}
+ind_map <- c(
+  "kr_employed_mfg_sa_value"          = "제조업",
+  "kr_employed_service_sa_value"      = "서비스업",
+  "kr_employed_construction_sa_value" = "건설업",
+  "kr_employed_it_sa_value"           = "정보통신",
+  "kr_employed_finance_sa_value"      = "금융보험"
+)
+
+ind_df <- fs_wide |>
+  select(period, period_date, any_of(names(ind_map))) |>
+  arrange(period_date) |>
+  pivot_longer(any_of(names(ind_map)), names_to="feature_name", values_to="val") |>
+  group_by(feature_name) |>
+  mutate(yoy_chg = val - lag(val, 12)) |>
+  ungroup() |>
+  filter(!is.na(yoy_chg)) |>
+  mutate(label = ind_map[feature_name])
+
+pd24i <- ind_df |> filter(period_date >= yoy_cutoff)
+
+ind_cls <- c(COL_BLK, COL_BLUE, COL_RED, COL_ORG, COL_GRN)
+ind_lty <- c("solid","solid","dashed","dashed","solid")
+ind_lvl <- c("제조업","서비스업","건설업","정보통신","금융보험")
+
+ggplot(pd24i |> filter(!is.na(label)),
+       aes(x=period_date, y=yoy_chg,
+           color=label, linetype=label, group=label)) +
+  geom_line(linewidth=0.9) +
+  geom_hline(yintercept=0, linewidth=0.5, color="black") +
+  scale_color_manual(values=setNames(ind_cls, ind_lvl),
+                     breaks=ind_lvl) +
+  scale_linetype_manual(values=setNames(ind_lty, ind_lvl),
+                        breaks=ind_lvl) +
+  scale_y_continuous(labels=function(x) paste0(x,"만명")) +
+  fmt_x_ym("6 months") +
+  labs(title="전년동월대비 산업별 취업자",
+       x="날짜", y="만명") +
+  theme_gov()
+```
+
+## 연령별
+
+```{r yoy-age, fig.height=4, fig.width=9}
+age_map <- c(
+  "kr_employed_youth_value"  = "청년(15~29)",
+  "kr_employed_prime_value"  = "핵심(30~54)",
+  "kr_employed_senior_value" = "고령(60+)"
+)
+
+age_df <- fs_wide |>
+  select(period, period_date, any_of(names(age_map))) |>
+  arrange(period_date) |>
+  pivot_longer(any_of(names(age_map)), names_to="feature_name", values_to="val") |>
+  group_by(feature_name) |>
+  mutate(yoy_chg = val - lag(val, 12)) |>
+  ungroup() |>
+  filter(!is.na(yoy_chg)) |>
+  mutate(label = age_map[feature_name])
+
+pd24a <- age_df |> filter(period_date >= yoy_cutoff)
+
+age_lvl <- c("청년(15~29)","핵심(30~54)","고령(60+)")
+age_cls <- setNames(c(COL_BLK, COL_BLUE, COL_RED), age_lvl)
+age_lty <- setNames(c("solid","dashed","solid"),    age_lvl)
+
+ggplot(pd24a |> filter(!is.na(label)),
+       aes(x=period_date, y=yoy_chg,
+           color=label, linetype=label, group=label)) +
+  geom_line(linewidth=0.9) +
+  geom_hline(yintercept=0, linewidth=0.5, color="black") +
+  scale_color_manual(values=age_cls, breaks=age_lvl) +
+  scale_linetype_manual(values=age_lty, breaks=age_lvl) +
+  scale_y_continuous(labels=function(x) paste0(x,"만명")) +
+  fmt_x_ym("6 months") +
+  labs(title="전년동월대비 연령별 취업자",
+       x="날짜", y="만명") +
+  theme_gov()
+```
+
+---
+
+# 구직급여 분석
+
+```{r jobseeker, fig.height=4, fig.width=9}
+js_lvl <- c("신규 신청","지속 수급")
+js_map <- c("kr_jobseeker_new_value"="신규 신청",
+            "kr_jobseeker_ongoing_value"="지속 수급")
+
+js_df <- fs_long |>
+  filter(feature_name %in% names(js_map)) |>
+  mutate(label=js_map[feature_name])
+
+js_cls <- setNames(c(COL_BLK, COL_BLUE), js_lvl)
+js_lty <- setNames(c("solid","dashed"),   js_lvl)
+
+p_js <- ggplot(js_df |> filter(!is.na(value)),
+               aes(x=period_date, y=value,
+                   color=label, linetype=label, group=label)) +
+  geom_line(linewidth=1.0) +
+  scale_color_manual(values=js_cls, breaks=js_lvl) +
+  scale_linetype_manual(values=js_lty, breaks=js_lvl) +
+  scale_y_continuous(labels=function(x) paste0(fmt_comma(x),"명")) +
+  fmt_x_ym("1 year") +
+  labs(title="구직급여 신청·수급자 수", x="날짜", y=NULL) +
+  theme_gov()
+
+js_yoy_df <- fs_wide |>
+  select(period, period_date, val=any_of("kr_jobseeker_new_value")) |>
+  arrange(period_date) |>
+  mutate(yoy=val-lag(val,12)) |>
+  filter(!is.na(yoy))
+
+p_js_yoy <- ggplot(js_yoy_df, aes(x=period_date, y=yoy)) +
+  geom_col(fill="grey65", width=25) +
+  geom_hline(yintercept=0, linewidth=0.5) +
+  scale_y_continuous(labels=function(x) paste0(fmt_comma(x),"명")) +
+  fmt_x_ym("1 year") +
+  labs(title="신규 신청 전년동월차", x="날짜", y=NULL) +
+  theme_gov()
+
+p_js | p_js_yoy
+```
+
+---
+
+# 임금 현황
+
+```{r wage, fig.height=4, fig.width=9}
+p_wage <- ggplot(
+  fs_long |> filter(feature_name=="kr_wage_total_value", !is.na(value)),
+  aes(x=period_date, y=value)) +
+  geom_line(color=COL_BLK, linewidth=1.0) +
+  scale_y_continuous(labels=function(x)
+    paste0(format(round(x/10000), big.mark=","),"만 원")) +
+  fmt_x_ym("1 year") +
+  labs(title="전체임금총액(만 원)", x="날짜", y=NULL) +
+  theme_gov()
+
+wage_yoy_df <- fs_wide |>
+  select(period, period_date, val=any_of("kr_wage_total_value")) |>
+  arrange(period_date) |>
+  mutate(yoy_pct=(val/lag(val,12)-1)*100) |>
+  filter(!is.na(yoy_pct))
+
+p_wage_yoy <- ggplot(wage_yoy_df, aes(x=period_date, y=yoy_pct)) +
+  geom_col(fill="grey65", width=25) +
+  geom_hline(yintercept=0, linewidth=0.5) +
+  scale_y_continuous(labels=function(x) paste0(round(x,1),"%")) +
+  fmt_x_ym("1 year") +
+  labs(title="임금 전년동월비 (%)", x="날짜", y=NULL) +
+  theme_gov()
+
+p_wage | p_wage_yoy
+```
+
+---
+
+# 미국 고용현황
+
+```{r us-nonfarm, fig.height=4, fig.width=9}
+us_df <- fs_wide |>
+  select(period, period_date,
+         any_of(c("us_nonfarm_total_sa_value","us_nonfarm_total_sa_mom_pct"))) |>
+  arrange(period_date)
+
+p_us <- ggplot(us_df |> filter(!is.na(us_nonfarm_total_sa_value)),
+               aes(x=period_date, y=us_nonfarm_total_sa_value)) +
+  geom_line(color=COL_BLK, linewidth=1.0) +
+  scale_y_continuous(labels=function(x)
+    paste0(format(round(x/1000,1), big.mark=","),"백만")) +
+  fmt_x_ym("1 year") +
+  labs(title="미국 비농업 취업자 수 (계절조정, 천명)", x="날짜", y=NULL) +
+  theme_gov()
+
+p_us_mom <- ggplot(us_df |> filter(!is.na(us_nonfarm_total_sa_mom_pct)),
+                   aes(x=period_date, y=us_nonfarm_total_sa_mom_pct)) +
+  geom_col(fill="grey65", width=25) +
+  geom_hline(yintercept=0, linewidth=0.5) +
+  scale_y_continuous(labels=function(x) paste0(round(x,2),"%")) +
+  fmt_x_ym("1 year") +
+  labs(title="전월대비 증감률 (%)", x="날짜", y=NULL) +
+  theme_gov()
+
+p_us | p_us_mom
+```
+
+```{r jolts, fig.height=4, fig.width=9}
+jolts_map <- c("us_job_openings_sa_value"="채용공고",
+               "us_hires_sa_value"       ="채용",
+               "us_quits_sa_value"       ="자발적 이직",
+               "us_layoffs_sa_value"     ="정리해고")
+jolts_lvl <- c("채용공고","채용","자발적 이직","정리해고")
+jolts_cls <- setNames(c(COL_BLK, COL_BLUE, COL_RED, COL_GREY), jolts_lvl)
+jolts_lty <- setNames(c("solid","dashed","solid","dashed"),      jolts_lvl)
+
+jolts_df <- fs_long |>
+  filter(feature_name %in% names(jolts_map), !is.na(value)) |>
+  mutate(label=jolts_map[feature_name])
+
+ggplot(jolts_df,
+       aes(x=period_date, y=value,
+           color=label, linetype=label, group=label)) +
+  geom_line(linewidth=0.9) +
+  scale_color_manual(values=jolts_cls, breaks=jolts_lvl) +
+  scale_linetype_manual(values=jolts_lty, breaks=jolts_lvl) +
+  scale_y_continuous(labels=function(x)
+    paste0(format(round(x/1000,1)),"백만")) +
+  fmt_x_ym("1 year") +
+  labs(title="미국 JOLTS — 채용공고·채용·이직 (천건, 계절조정)",
+       x="날짜", y=NULL) +
+  theme_gov()
+```
+
+---
+
+# 온라인 선행지표 {.tabset}
+
+## 네이버 DataLab
+
+```{r naver-search, fig.height=4, fig.width=9}
+srch_map <- c("kr_search_employment_value"      ="취업",
+              "kr_search_jobchange_value"        ="이직",
+              "kr_search_hiring_value"           ="채용",
+              "kr_search_employment_youth_value" ="취업(20대)")
+srch_lvl <- c("취업","이직","채용","취업(20대)")
+srch_cls <- setNames(c(COL_BLK, COL_BLUE, COL_RED, COL_GREY), srch_lvl)
+srch_lty <- setNames(c("solid","solid","dashed","dashed"),     srch_lvl)
+
+srch_df <- fs_long |>
+  filter(feature_name %in% names(srch_map), !is.na(value)) |>
+  mutate(label=srch_map[feature_name])
+
+ggplot(srch_df,
+       aes(x=period_date, y=value,
+           color=label, linetype=label, group=label)) +
+  geom_line(linewidth=0.9) +
+  scale_color_manual(values=srch_cls, breaks=srch_lvl) +
+  scale_linetype_manual(values=srch_lty, breaks=srch_lvl) +
+  fmt_x_ym("1 year") +
+  labs(title="네이버 고용 관련 키워드 검색 지수 (0~100)",
+       x="날짜", y="%") +
+  theme_gov() +
+  labs(caption="출처: 네이버 데이터랩")
+```
+
+## 구글 트렌드
+
+```{r gtrend, fig.height=4, fig.width=9}
+gt_map <- c("kr_gtrend_employment_value"  ="취업",
+            "kr_gtrend_jobchange_value"   ="이직",
+            "kr_gtrend_unemployment_value"="실업")
+gt_lvl <- c("취업","이직","실업")
+gt_cls <- setNames(c(COL_BLK, COL_BLUE, COL_RED), gt_lvl)
+gt_lty <- setNames(c("solid","dashed","solid"),    gt_lvl)
+
+gt_df <- fs_long |>
+  filter(feature_name %in% names(gt_map), !is.na(value)) |>
+  mutate(label=gt_map[feature_name])
+
+ggplot(gt_df,
+       aes(x=period_date, y=value,
+           color=label, linetype=label, group=label)) +
+  geom_line(linewidth=0.9) +
+  scale_color_manual(values=gt_cls, breaks=gt_lvl) +
+  scale_linetype_manual(values=gt_lty, breaks=gt_lvl) +
+  fmt_x_ym("1 year") +
+  labs(title="구글 트렌드 검색 지수",
+       x="날짜", y="지수") +
+  theme_gov()
+```
+
+---
+
+# 시계열 분해 (STL) {.tabset}
+
+## 계절·추세 강도 요약
+
+```{r stl-strength}
+if (nrow(stl_strength) > 0 && nrow(desc_stats) > 0) {
+  stl_strength |>
+    left_join(desc_stats |> select(feature_name, description_ko, feature_group),
+              by="feature_name") |>
+    select(feature_group, description_ko, n_obs,
+           seasonal_strength, seasonal_label,
+           trend_strength,    trend_label,
+           n_remainder_anom) |>
+    arrange(feature_group, desc(seasonal_strength)) |>
+    mutate(across(c(seasonal_strength,trend_strength), ~round(.x,3))) |>
+    rename(그룹=feature_group, 지표=description_ko, 관측수=n_obs,
+           계절강도=seasonal_strength, 계절판정=seasonal_label,
+           추세강도=trend_strength,    추세판정=trend_label,
+           잔차이상치=n_remainder_anom) |>
+    kable(caption="피처별 STL 계절·추세 강도") |>
+    kable_styling(bootstrap_options=c("striped","hover","condensed"),
+                  full_width=TRUE) |>
+    collapse_rows(columns=1, valign="top")
+} else {
+  cat("> STL 데이터 없음")
+}
+```
+
+## 주요 지표 STL 분해
+
+```{r stl-decomp, fig.height=7, fig.width=9}
+plot_stl <- function(feat, title_str) {
+  d <- stl_comp |>
+    filter(feature_name==feat) |>
+    mutate(period_date = {
+      p <- as.character(period)
+      as.Date(ifelse(nchar(p) == 7, paste0(p, "-01"), p))
+    })
+  if (nrow(d)==0) return(NULL)
+
+  mk <- function(y_col, y_lab, type="line") {
+    p <- ggplot(d, aes(x=period_date))
+    if (type=="line")
+      p <- p + geom_line(aes(y=.data[[y_col]]),
+                         color=COL_BLK, linewidth=0.8)
+    else
+      p <- p + geom_col(aes(y=.data[[y_col]]),
+                        fill="grey65", width=25)
+    p + fmt_x_ym("1 year") +
+      labs(y=y_lab, x=NULL) + theme_gov()
+  }
+
+  (mk("observed","원계열") /
+   mk("trend",   "추세") /
+   mk("seasonal","계절성","col") /
+   mk("remainder","잔차", "col")) +
+  plot_annotation(title=title_str)
+}
+
+plot_stl("kr_employed_total_sa_value",
+         "한국 전체 취업자 수 (계절조정) — STL 분해")
+```
+
+---
+
+# 교차상관 분석 (CCF) — 선행지표
+
+```{r ccf-bubble, fig.height=5, fig.width=9}
+if (nrow(ccf_summary) > 0 && nrow(desc_stats) > 0) {
+  ccf_p <- ccf_summary |>
+    filter(best_lag != 0, best_ccf_abs >= 0.2) |>
+    left_join(desc_stats |> select(feature_name,description_ko) |>
+                rename(x_feature=feature_name, x_desc=description_ko), by="x_feature") |>
+    left_join(desc_stats |> select(feature_name,description_ko) |>
+                rename(y_feature=feature_name, y_desc=description_ko), by="y_feature") |>
+    mutate(x_label=str_trunc(x_desc,16),
+           y_label=str_trunc(y_desc,16))
+
+  if (nrow(ccf_p)>0) {
+    ggplot(ccf_p,
+           aes(x=best_lag, y=y_label, size=best_ccf_abs, color=direction)) +
+      geom_point(alpha=0.75) +
+      geom_vline(xintercept=0, linetype="dashed", color="grey50") +
+      scale_size_continuous(range=c(3,10), name="|r|") +
+      scale_color_manual(values=c("정방향"=COL_BLUE,"역방향"=COL_RED),
+                         name="방향") +
+      labs(title="선행지표 버블차트",
+           subtitle="버블 크기: |상관계수|  /  x>0: 선행",
+           x="Lag (월)", y="타겟 지표") +
+      theme_gov() +
+      theme(axis.text.y=element_text(size=8))
+  } else cat("> |r|≥0.2 선행지표 없음")
+} else cat("> CCF 데이터 없음")
+```
+
+---
+
+# 예측 (`r ARIMA_HORIZON`개월 전망)
+
+```{r forecast, fig.height=8, fig.width=9}
+FC_TARGETS <- c(
+  "kr_employed_total_sa_value" = "한국 전체 취업자 (만명)",
+  "kr_employed_youth_value"    = "청년 취업자 (만명)",
+  "kr_wage_total_value"        = "월평균 임금 (원)",
+  "kr_jobseeker_new_value"     = "구직급여 신규 신청 (명)",
+  "us_nonfarm_total_sa_value"  = "미국 비농업 취업자 (천명)"
+)
+
+plot_fc <- function(feat, label) {
+  .tmp <- fs_wide |> select(period_date, any_of(feat))
+  if (feat %in% names(.tmp)) {
+    .tmp <- rename(.tmp, value = !!sym(feat))
+  } else {
+    .tmp$value <- NA_real_
+  }
+  hist_d <- .tmp |> filter(!is.na(value))  # 전체 기간 사용
+  safe_filter_fc <- function(df, .feat_name) {
+    if (nrow(df) == 0 || !"feature_name" %in% names(df)) return(tibble())
+    df |> filter(feature_name == .feat_name) |>
+      mutate(period_date = {
+        p <- as.character(period)
+        as.Date(ifelse(nchar(p) == 7, paste0(p, "-01"), p))
+      })
+  }
+  ar_d <- safe_filter_fc(fc_arima,   feat)
+  pr_d <- safe_filter_fc(fc_prophet, feat)
+  if (nrow(ar_d)==0 && nrow(pr_d)==0) return(NULL)
+
+  p <- ggplot() +
+    geom_line(data=hist_d, aes(x=period_date,y=value),
+              color=COL_BLK, linewidth=1.0)
+  if (nrow(ar_d)>0)
+    p <- p +
+      geom_ribbon(data=ar_d,
+                  aes(x=period_date,ymin=lo_95,ymax=hi_95),
+                  fill=COL_BLUE, alpha=0.12) +
+      geom_line(data=ar_d,
+                aes(x=period_date,y=forecast,color="ARIMA"),
+                linewidth=0.9, linetype="dashed")
+  if (nrow(pr_d)>0)
+    p <- p +
+      geom_ribbon(data=pr_d,
+                  aes(x=period_date,ymin=lo_95,ymax=hi_95),
+                  fill=COL_RED, alpha=0.08) +
+      geom_line(data=pr_d,
+                aes(x=period_date,y=forecast,color="Prophet"),
+                linewidth=0.9, linetype="dotted")
+  p +
+    scale_color_manual(values=c("ARIMA"=COL_BLUE,"Prophet"=COL_RED)) +
+    fmt_x_ym("6 months") +
+    labs(title=label, x=NULL, y=NULL) +
+    theme_gov() +
+    theme(legend.position="right")
+}
+
+plots <- purrr::map2(names(FC_TARGETS), unname(FC_TARGETS), plot_fc)
+plots <- Filter(Negate(is.null), plots)
+if (length(plots) == 0) {
+  cat("> 예측 데이터 없음")
+} else if (length(plots) == 1) {
+  print(plots[[1]])
+} else {
+  print(wrap_plots(plots, ncol=2))
+}
+```
+
+---
+
+# 부록
+
+## 데이터 출처
+
+| 소스 | 지표 | 제공 기관 |
+|---|---|---|
+| KOSIS (경제활동인구조사) | 취업자 수 (성·연령·산업별), 고용률 | 통계청 |
+| KOSIS (사업체노동력조사) | 임금·근로시간 | 고용노동부 |
+| KOSIS (고용행정통계) | 구직급여 신청·수급 동향 | 고용노동부 |
+| BLS CES | 비농업 취업자·임금 (미국) | 미국 노동통계국 |
+| BLS JOLTS | 채용공고·채용·이직 (미국) | 미국 노동통계국 |
+| Naver DataLab | 취업·이직·채용 키워드 검색 지수 | 네이버 |
+| Google Trends | 취업·이직·실업 검색 빈도 | Google |
+
+## 분석 환경
+
+```{r session-info}
+si <- sessionInfo()
+cat(glue(
+  "R 버전: {si$R.version$version.string}\n",
+  "분석 일시: {format(Sys.time(), '%Y-%m-%d %H:%M:%S KST')}\n",
+  "분석 기간: {PERIOD_START} ~ {PERIOD_END}\n"
+))
+```
+
+---
+
+*본 리포트는 고용동향 분석 파이프라인에 의해 자동 생성됩니다.*

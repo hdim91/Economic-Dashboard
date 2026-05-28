@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>고용·금융 동향 리포트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy:   #0B1F3A;
+    --navy2:  #122847;
+    --navy3:  #1A3560;
+    --blue:   #1D6FA4;
+    --accent: #2E9EE5;
+    --gold:   #C8973A;
+    --white:  #F5F7FA;
+    --muted:  #8FA0B4;
+    --border: rgba(255,255,255,0.08);
+    --card:   rgba(255,255,255,0.04);
+    --up:     #4EC67A;
+    --down:   #E25C5C;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background: var(--navy);
+    color: var(--white);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── 배경 그리드 패턴 ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(45,158,229,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(45,158,229,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── 헤더 ── */
+  header {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 48px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(11,31,58,0.9);
+    backdrop-filter: blur(12px);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-mark {
+    width: 32px;
+    height: 32px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .logo-mark svg { width: 18px; height: 18px; }
+
+  .logo-text {
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.2px;
+    color: var(--white);
+  }
+
+  .logo-sub {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 300;
+    letter-spacing: 0.5px;
+    margin-top: 1px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .pipeline-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--up);
+    animation: pulse 2.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── 히어로 섹션 ── */
+  .hero {
+    position: relative;
+    z-index: 1;
+    padding: 56px 48px 40px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+
+  .hero-eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 2px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .hero-title {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.8px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+  }
+
+  .hero-title span { color: var(--accent); }
+
+  .hero-period {
+    font-size: 13px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* ── 리포트 카드 행 ── */
+  .report-row {
+    position: relative;
+    z-index: 1;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 48px 40px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .report-card {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    overflow: hidden;
+  }
+
+  .report-card:hover {
+    border-color: rgba(45,158,229,0.35);
+    background: rgba(29,111,164,0.08);
+  }
+
+  .report-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .report-card.employment::before { background: var(--accent); }
+  .report-card.finance::before    { background: var(--gold); }
+
+  .card-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: 14px;
+  }
+
+  .employment .card-badge {
+    background: rgba(45,158,229,0.15);
+    color: var(--accent);
+  }
+
+  .finance .card-badge {
+    background: rgba(200,151,58,0.15);
+    color: var(--gold);
+  }
+
+  .card-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
+  }
+
+  .card-desc {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 300;
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+
+  .card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .card-date {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .card-date strong {
+    color: var(--white);
+    font-weight: 500;
+  }
+
+  .btn-report {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    background: rgba(45,158,229,0.1);
+    border: 1px solid rgba(45,158,229,0.25);
+    border-radius: 6px;
+    padding: 7px 14px;
+    text-decoration: none;
+    transition: background .15s, border-color .15s;
+  }
+
+  .btn-report:hover {
+    background: rgba(45,158,229,0.2);
+    border-color: rgba(45,158,229,0.5);
+  }
+
+  .btn-report svg { width: 13px; height: 13px; }
+
+  /* ── 지표 그리드 ── */
+  .indicators {
+    position: relative;
+    z-index: 1;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 48px 48px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+
+  .kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    transition: border-color .2s;
+  }
+
+  .kpi-card:hover { border-color: rgba(45,158,229,0.25); }
+  .kpi-card.finance-kpi:hover { border-color: rgba(200,151,58,0.25); }
+
+  .kpi-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+
+  .kpi-value {
+    font-size: 26px;
+    font-weight: 700;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .kpi-unit {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    font-family: 'Noto Sans KR', sans-serif;
+    margin-left: 2px;
+  }
+
+  .kpi-change {
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    font-weight: 500;
+  }
+
+  .kpi-change.up   { color: var(--up); }
+  .kpi-change.down { color: var(--down); }
+  .kpi-change.neu  { color: var(--muted); }
+
+  .kpi-period {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* ── 미니 스파크라인 ── */
+  .sparkline-wrap {
+    margin-top: 10px;
+    height: 30px;
+  }
+
+  .sparkline-wrap svg { width: 100%; height: 30px; }
+
+  /* ── 로딩 스켈레톤 ── */
+  .skeleton {
+    background: linear-gradient(90deg,
+      rgba(255,255,255,0.04) 25%,
+      rgba(255,255,255,0.08) 50%,
+      rgba(255,255,255,0.04) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+  }
+
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ── 푸터 ── */
+  footer {
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 20px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  /* ── 반응형 — 900px 이하 (태블릿·모바일) ── */
+  @media (max-width: 900px) {
+    header { padding: 14px 20px; flex-wrap: wrap; gap: 10px; }
+    .logo-sub { display: none; }
+    .pipeline-status { font-size: 11px; }
+    .hero { padding: 32px 20px 28px; }
+    .hero-title { font-size: 24px; }
+    .report-row { grid-template-columns: 1fr; padding: 0 20px 28px; }
+    .indicators { padding: 0 20px 36px; }
+    footer { padding: 16px 20px; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .kpi-value { font-size: 22px; }
+    .sparkline-wrap { height: 24px; }
+    .sparkline-wrap svg { height: 24px; }
+  }
+
+  /* ── 반응형 — 480px 이하 (소형 모바일) ── */
+  @media (max-width: 480px) {
+    header { padding: 12px 16px; }
+    .logo-text { font-size: 13px; }
+    .hero-title { font-size: 20px; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .kpi-value { font-size: 20px; }
+    .card-title { font-size: 17px; }
+    .card-desc { font-size: 12px; }
+    footer { flex-direction: column; gap: 8px; text-align: center; }
+  }
+
+  /* ── 페이드인 ── */
+  .fade-in {
+    opacity: 0;
+    transform: translateY(12px);
+    animation: fadeIn .5s ease forwards;
+  }
+
+  @keyframes fadeIn {
+    to { opacity: 1; transform: none; }
+  }
+
+  .fade-in:nth-child(1) { animation-delay: .05s; }
+  .fade-in:nth-child(2) { animation-delay: .10s; }
+  .fade-in:nth-child(3) { animation-delay: .15s; }
+  .fade-in:nth-child(4) { animation-delay: .20s; }
+  .fade-in:nth-child(5) { animation-delay: .25s; }
+</style>
+</head>
+<body>
+
+<!-- ── 헤더 ───────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">
+      <svg viewBox="0 0 18 18" fill="none">
+        <rect x="1" y="9" width="3" height="8" rx="1" fill="white" opacity=".6"/>
+        <rect x="6" y="5" width="3" height="12" rx="1" fill="white" opacity=".8"/>
+        <rect x="11" y="1" width="3" height="16" rx="1" fill="white"/>
+        <path d="M2.5 8L7.5 4L12.5 2" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-opacity=".5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-text">동향 리포트</div>
+      <div class="logo-sub">고용 · 금융</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="pipeline-status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="pipeline-time">파이프라인 로딩 중...</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── 히어로 ──────────────────────────────────────── -->
+<section class="hero">
+  <p class="hero-eyebrow">Auto Report System</p>
+  <h1 class="hero-title">경제 <span>동향</span> 대시보드</h1>
+  <p class="hero-period" id="hero-period">데이터 기준 기간 로딩 중...</p>
+</section>
+
+<!-- ── 리포트 카드 ──────────────────────────────────── -->
+<section class="report-row">
+  <div class="report-card employment fade-in">
+    <span class="card-badge">고용동향</span>
+    <h2 class="card-title">고용시장 분석 리포트</h2>
+    <p class="card-desc">취업자 수 · 고용률 · 구직급여 · 임금 현황<br>STL 시계열 분해 · ARIMA 예측</p>
+    <div class="card-meta">
+      <div class="card-date">최신 발행 <strong id="report-date">—</strong></div>
+      <a href="#" class="btn-report" id="btn-emp" onclick="openReport(event)">
+        <svg viewBox="0 0 13 13" fill="none">
+          <path d="M6.5 1v8M3 6l3.5 3.5L10 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M1 10.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        리포트 열기
+      </a>
+    </div>
+  </div>
+  <div class="report-card finance fade-in">
+    <span class="card-badge">금융동향</span>
+    <h2 class="card-title">금융시장 분석 리포트</h2>
+    <p class="card-desc">금리 · 물가 · 주택가격 · 가계부채 현황<br>ECOS · FRED · BEA 데이터 기반</p>
+    <div class="card-meta">
+      <div class="card-date">최신 발행 <strong id="fin-report-date">—</strong></div>
+      <a href="#" class="btn-report" id="btn-fin" onclick="openFinReport(event)">
+        <svg viewBox="0 0 13 13" fill="none">
+          <path d="M6.5 1v8M3 6l3.5 3.5L10 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M1 10.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        리포트 열기
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── KPI 지표 ─────────────────────────────────────── -->
+<section class="indicators">
+  <p class="section-label">핵심 지표 — 고용동향</p>
+  <div class="kpi-grid" id="kpi-grid">
+    <!-- JS로 렌더링 -->
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+  </div>
+</section>
+
+<!-- ── KPI 지표 — 금융동향 ─────────────────────────── -->
+<!--
+  [fe-01] Antigravity 작업 영역
+  ─────────────────────────────────────────────────────
+  구현 사항:
+    1. kpi-grid-finance 의 스켈레톤 카드를 renderFinanceKPI()로 교체
+    2. renderFinanceKPI(ind) 함수 작성 (renderKPI 패턴 동일)
+    3. loadData() 내 renderFinanceKPI(data.indicators) 호출 추가
+
+  데이터 바인딩: fin-04 완료 후 진행 (현재는 스켈레톤 유지)
+
+  금융 KPI 5개 (JS 키 → 표시명):
+    kr_base_rate   → 한국 기준금리      (%, ECOS)
+    kr_cpi         → 소비자물가지수     (지수, ECOS/KOSIS)
+    kr_house_price → 주택매매가격지수   (지수, KOSIS)
+    kr_usd_krw     → 원/달러 환율       (원, ECOS)
+    us_fed_rate    → 미국 연방기금금리  (%, FRED)
+
+  컬러: --gold (#C8973A) 포인트 사용
+  CSS: 기존 .kpi-grid / .kpi-card / .skeleton 재사용
+       금융 카드에 .finance-kpi 클래스 추가 (hover border-color: gold)
+  ─────────────────────────────────────────────────────
+-->
+<section class="indicators" style="padding-top:0">
+  <p class="section-label">핵심 지표 — 금융동향</p>
+  <div class="kpi-grid" id="kpi-grid-finance">
+    <!-- [fe-01] renderFinanceKPI()로 교체 예정 — 현재 스켈레톤 placeholder -->
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+    <div class="kpi-card"><div class="kpi-label skeleton" style="height:12px;width:80%"></div><div class="kpi-value skeleton" style="height:28px;margin-top:10px;width:60%"></div></div>
+  </div>
+</section>
+
+<!-- ── 금융동향 스프레드 차트 ────────────────────────── -->
+<section class="indicators" id="section-spread" style="padding-top:0;display:none">
+  <p class="section-label">금융동향 — 한미 금리 스프레드</p>
+  <div id="spread-chart-wrap" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px"></div>
+  <div id="spread-summary-wrap" style="margin-top:16px"></div>
+</section>
+
+<!-- ── 푸터 ────────────────────────────────────────── -->
+<footer>
+  <span>데이터 출처: KOSIS · BLS · Naver DataLab · Google Trends</span>
+  <span id="generated-at" style="font-family:'DM Mono',monospace"></span>
+</footer>
+
+<script>
+const DATA_URL = 'https://storage.googleapis.com/auto-report-489722-reports/dashboard/data.json';
+
+function fmt(n, digits=1) {
+  if (n == null) return '—';
+  return Number(n).toFixed(digits).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function fmtWon(n) {
+  if (n == null) return '—';
+  return Math.round(n / 10000).toLocaleString('ko-KR');
+}
+
+function changeClass(v) {
+  if (v == null) return 'neu';
+  return v > 0 ? 'up' : v < 0 ? 'down' : 'neu';
+}
+
+function changeArrow(v) {
+  if (v == null) return '';
+  return v > 0 ? '▲' : v < 0 ? '▼' : '─';
+}
+
+function drawSparkline(series, container) {
+  if (!series || series.length < 2) return;
+  const vals = series.map(d => d.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const w = 100, h = 30, pad = 2;
+  const pts = vals.map((v, i) => {
+    const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return `${x},${y}`;
+  }).join(' ');
+  container.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="#2E9EE5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <circle cx="${pts.split(' ').pop().split(',')[0]}" cy="${pts.split(' ').pop().split(',')[1]}" r="2.5" fill="#2E9EE5"/>
+  </svg>`;
+}
+
+function renderKPI(ind) {
+  const kpis = [
+    {
+      key: 'kr_employed',
+      valueStr: () => fmt(ind.kr_employed?.latest?.value, 1),
+      unit: '만명',
+      changeVal: ind.kr_employed?.yoy_chg,
+      changeLabel: '전년동월차',
+      period: ind.kr_employed?.latest?.period,
+      series: ind.kr_employed?.series,
+    },
+    {
+      key: 'kr_emprate',
+      valueStr: () => fmt(ind.kr_emprate?.latest?.value, 1),
+      unit: '%',
+      changeVal: null,
+      changeLabel: '',
+      period: null,
+      series: null,
+    },
+    {
+      key: 'kr_jobseeker',
+      valueStr: () => ind.kr_jobseeker?.latest
+        ? Math.round(ind.kr_jobseeker.latest.value).toLocaleString('ko-KR')
+        : '—',
+      unit: '명',
+      changeVal: null,
+      changeLabel: '',
+      period: ind.kr_jobseeker?.latest?.period,
+      series: null,
+    },
+    {
+      key: 'kr_wage',
+      valueStr: () => fmtWon(ind.kr_wage?.latest?.value),
+      unit: '만원',
+      changeVal: null,
+      changeLabel: '',
+      period: ind.kr_wage?.latest?.period,
+      series: null,
+    },
+    {
+      key: 'us_nonfarm',
+      valueStr: () => ind.us_nonfarm?.latest
+        ? Math.round(ind.us_nonfarm.latest.value).toLocaleString('ko-KR')
+        : '—',
+      unit: '천명',
+      changeVal: ind.us_nonfarm?.latest?.mom_chg,
+      changeLabel: '전월차',
+      period: ind.us_nonfarm?.latest?.period,
+      series: null,
+    },
+  ];
+
+  const labels = {
+    kr_employed:  '한국 취업자 수\n(계절조정)',
+    kr_emprate:   '고용률',
+    kr_jobseeker: '구직급여\n신규 신청',
+    kr_wage:      '월평균 임금',
+    us_nonfarm:   '미국 비농업\n취업자',
+  };
+
+  const grid = document.getElementById('kpi-grid');
+  grid.innerHTML = '';
+
+  kpis.forEach((kpi, i) => {
+    const card = document.createElement('div');
+    card.className = 'kpi-card fade-in';
+    const chgCls = changeClass(kpi.changeVal);
+    const chgStr = kpi.changeVal != null
+      ? `${changeArrow(kpi.changeVal)} ${fmt(Math.abs(kpi.changeVal), 1)} ${kpi.changeLabel}`
+      : '';
+    card.innerHTML = `
+      <div class="kpi-label">${labels[kpi.key].replace('\n','<br>')}</div>
+      <div class="kpi-value">${kpi.valueStr()}<span class="kpi-unit">${kpi.unit}</span></div>
+      ${chgStr ? `<div class="kpi-change ${chgCls}">${chgStr}</div>` : ''}
+      ${kpi.period ? `<div class="kpi-period">${kpi.period} 기준</div>` : ''}
+      ${kpi.series ? `<div class="sparkline-wrap" id="spark-${kpi.key}"></div>` : ''}
+    `;
+    grid.appendChild(card);
+
+    if (kpi.series) {
+      setTimeout(() => drawSparkline(kpi.series, document.getElementById(`spark-${kpi.key}`)), 50);
+    }
+  });
+}
+
+function renderFinanceKPI(ind) {
+  if (!ind || !ind.kr_base_rate) return; 
+
+  const kpis = [
+    { key: 'kr_base_rate', unit: '%', label: '한국 기준금리', digits: 2 },
+    { key: 'kr_cpi', unit: '지수', label: '소비자물가지수 (CPI)', digits: 1 },
+    { key: 'kr_house_price', unit: '지수', label: '주택매매가격지수', digits: 1 },
+    { key: 'kr_usd_krw', unit: '원', label: '원/달러 환율', digits: 1 },
+    { key: 'us_fed_rate', unit: '%', label: '미국 연방기금금리', digits: 2 }
+  ];
+
+  const grid = document.getElementById('kpi-grid-finance');
+  grid.innerHTML = '';
+
+  kpis.forEach(kpi => {
+    const data = ind[kpi.key];
+    const val = data?.latest?.value;
+    const period = data?.latest?.period;
+    
+    const card = document.createElement('div');
+    card.className = 'kpi-card finance-kpi fade-in';
+    
+    card.innerHTML = `
+      <div class="kpi-label">${kpi.label}</div>
+      <div class="kpi-value">${fmt(val, kpi.digits)}<span class="kpi-unit">${kpi.unit}</span></div>
+      ${period ? `<div class="kpi-period">${period} 기준</div>` : ''}
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function drawSpreadLine(series, container, label) {
+  if (!series || series.length < 2) return;
+  const vals = series.map(d => d.spread).filter(v => v != null);
+  const periods = series.map(d => d.period);
+  if (vals.length < 2) return;
+  const minV = Math.min(...vals), maxV = Math.max(...vals);
+  const range = (maxV - minV) || 1;
+  const w = 280, h = 80, padX = 4, padY = 6;
+  const pts = vals.map((v, i) => {
+    const x = padX + (i / (vals.length - 1)) * (w - padX * 2);
+    const y = padY + (1 - (v - minV) / range) * (h - padY * 2);
+    return x + ',' + y;
+  }).join(' ');
+  const zeroY = padY + (1 - (0 - minV) / range) * (h - padY * 2);
+  const zeroLine = (minV < 0 && maxV > 0)
+    ? '<line x1="' + padX + '" y1="' + zeroY.toFixed(1) + '" x2="' + (w-padX) + '" y2="' + zeroY.toFixed(1) + '" stroke="#888" stroke-width="0.6" stroke-dasharray="3,2"/>'
+    : '';
+  const lastVal = vals[vals.length - 1];
+  const lastPeriod = periods[periods.length - 1];
+  const col = lastVal >= 0 ? '#3366CC' : '#CC3333';
+  container.innerHTML =
+    '<div style="font-size:11px;color:#555;margin-bottom:4px;font-weight:500">' + label + '</div>' +
+    '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%;height:' + h + 'px">' +
+      zeroLine +
+      '<polyline points="' + pts + '" fill="none" stroke="' + col + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>' +
+    '</svg>' +
+    '<div style="font-size:11px;color:#444;margin-top:3px">' +
+      lastPeriod + ' 기준 <strong style="color:' + col + '">' +
+      (lastVal >= 0 ? '+' : '') + lastVal.toFixed(2) + '%p</strong>' +
+    '</div>';
+}
+
+function renderSpreadCharts(spreadData, summary) {
+  const SPREAD_META = {
+    spread_policy_rate: '한미 기준금리 스프레드 (KR\u2212US)',
+    spread_bond_10y:    '한미 국채 10년 스프레드 (KR\u2212US)',
+    spread_cpi:         '한미 CPI 갭 (YoY% 기준)',
+  };
+  const wrap = document.getElementById('spread-chart-wrap');
+  wrap.innerHTML = '';
+  ['spread_policy_rate', 'spread_bond_10y', 'spread_cpi'].forEach(key => {
+    if (!spreadData[key]) return;
+    const div = document.createElement('div');
+    div.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px';
+    wrap.appendChild(div);
+    drawSpreadLine(spreadData[key], div, SPREAD_META[key] || key);
+  });
+  if (!summary || !summary.length) return;
+  const sumWrap = document.getElementById('spread-summary-wrap');
+  const rows = summary.map(s => {
+    const col = s.direction === '확대' ? '#CC3333' : s.direction === '축소' ? '#3366CC' : '#888';
+    return '<tr>' +
+      '<td style="padding:5px 10px;font-size:12px">' + s.label + '</td>' +
+      '<td style="padding:5px 10px;font-size:12px;text-align:right;font-weight:600;color:' + col + '">' +
+        (s.spread != null ? (s.spread >= 0 ? '+' : '') + s.spread.toFixed(2) + '%p' : '\u2014') + '</td>' +
+      '<td style="padding:5px 10px;font-size:11px;color:#777">' + (s.period || '') + '</td>' +
+      '<td style="padding:5px 10px;font-size:11px;color:' + col + '">' + (s.direction || '') + '</td>' +
+      '</tr>';
+  }).join('');
+  sumWrap.innerHTML =
+    '<table style="width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
+      '<thead><tr style="background:var(--bg2)">' +
+        '<th style="padding:6px 10px;font-size:11px;text-align:left;font-weight:600">스프레드</th>' +
+        '<th style="padding:6px 10px;font-size:11px;text-align:right;font-weight:600">최신값</th>' +
+        '<th style="padding:6px 10px;font-size:11px;text-align:left;font-weight:600">기준일</th>' +
+        '<th style="padding:6px 10px;font-size:11px;text-align:left;font-weight:600">방향</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function openReport(e) {
+  e.preventDefault();
+  const url = window._reportUrl;
+  if (url) window.open(url, '_blank');
+}
+
+function openFinReport(e) {
+  e.preventDefault();
+  const url = window._finReportUrl;
+  if (url) window.open(url, '_blank');
+}
+
+async function loadData() {
+  try {
+    const res  = await fetch(DATA_URL + '?t=' + Date.now());
+    const data = await res.json();
+
+    // 파이프라인 시각
+    if (data.last_pipeline_run) {
+      const d = new Date(data.last_pipeline_run);
+      document.getElementById('pipeline-time').textContent =
+        '마지막 실행 ' + d.toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    }
+
+    // 리포트 발행일
+    if (data.latest_report?.rendered_at) {
+      const d = new Date(data.latest_report.rendered_at);
+      document.getElementById('report-date').textContent =
+        d.toLocaleDateString('ko-KR', {year:'numeric',month:'long',day:'numeric'});
+      document.getElementById('hero-period').textContent =
+        '데이터 기준: ' + (data.latest_report.period_end || '—');
+    }
+
+    // 리포트 URL
+    if (data.latest_report?.gcs_url) {
+      window._reportUrl = data.latest_report.gcs_url;
+    }
+
+    if (data.latest_finance_report?.gcs_url) {
+      window._finReportUrl = data.latest_finance_report.gcs_url;
+      const fd = new Date(data.latest_finance_report.rendered_at);
+      const el = document.getElementById('fin-report-date');
+      if (el) el.textContent = fd.toLocaleDateString('ko-KR',
+        {year:'numeric', month:'long', day:'numeric'});
+    }
+
+    // KPI
+    if (data.indicators) {
+      renderKPI(data.indicators);
+      renderFinanceKPI(data.indicators);
+    }
+
+    if (data.finance_spread && Object.keys(data.finance_spread).length > 0) {
+      document.getElementById('section-spread').style.display = '';
+      renderSpreadCharts(data.finance_spread, data.finance_spread_summary || []);
+    }
+
+    // 생성 시각
+    if (data.generated_at) {
+      const d = new Date(data.generated_at);
+      document.getElementById('generated-at').textContent =
+        '데이터 갱신 ' + d.toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    }
+
+  } catch (err) {
+    console.warn('Dashboard data load failed:', err);
+    document.getElementById('pipeline-time').textContent = '데이터 로드 실패';
+    document.getElementById('status-dot').style.background = '#E25C5C';
+    document.getElementById('status-dot').style.animation = 'none';
+  }
+}
+
+loadData();
+</script>
+</body>
+</html>

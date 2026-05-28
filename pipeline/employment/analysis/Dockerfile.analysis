@@ -1,0 +1,60 @@
+# ============================================================================
+# Dockerfile.analysis — Analysis Layer (R + Python 통합 컨테이너)
+# Python 파이프라인 완료 후 Rscript run_analysis.R 로 분석 실행
+# ============================================================================
+
+FROM rocker/r-ver:4.4 AS r-builder
+
+# 시스템 패키지 (bigrquery, prophet 빌드 의존성)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl-dev \
+        libcurl4-openssl-dev \
+        libxml2-dev \
+        libgit2-dev \
+        libfontconfig1-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libfreetype6-dev \
+        libpng-dev \
+        libtiff5-dev \
+        libjpeg-dev \
+        python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# R 패키지 설치 (renv 대신 직접 설치 — 이미지 크기 최적화)
+RUN Rscript -e "
+  pkgs <- c(
+    'bigrquery', 'dplyr', 'tidyr', 'lubridate', 'glue', 'purrr',
+    'zoo', 'tsibble', 'moments', 'tseries', 'forecast', 'prophet'
+  )
+  install.packages(pkgs, repos='https://cloud.r-project.org', Ncpus=4)
+"
+
+# ── 런타임 ────────────────────────────────────────────────────────────────
+FROM rocker/r-ver:4.4
+
+# 런타임 시스템 라이브러리
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libssl3 libcurl4 libxml2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 빌드 스테이지에서 R 라이브러리 복사
+COPY --from=r-builder /usr/local/lib/R/library /usr/local/lib/R/library
+
+WORKDIR /app/analysis
+COPY 00_config.R         .
+COPY 01_load_features.R  .
+COPY 02_descriptive.R    .
+COPY 03_stl_decomp.R     .
+COPY 04_acf_pacf.R       .
+COPY 05_ccf.R            .
+COPY 06_forecast.R       .
+COPY run_analysis.R      .
+
+# 환경변수 기본값 (Cloud Run Job에서 주입)
+ENV R_LIBS_USER=/usr/local/lib/R/library
+
+ENTRYPOINT ["Rscript", "run_analysis.R"]
+# 특정 단계만 실행 예시:
+#   docker run ... analysis --steps 02,03
+#   docker run ... analysis --skip 06

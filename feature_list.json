@@ -1,0 +1,202 @@
+[
+  {
+    "id": "emp-01",
+    "module": "employment",
+    "description": "Google Trends 0건 문제 원인 파악 및 수정",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": []
+  },
+  {
+    "id": "emp-02",
+    "module": "employment",
+    "description": "ECOS M2·환율 item_code 수정 후 ecos_fetcher.py 최종 완성",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": []
+  },
+  {
+    "id": "fin-01",
+    "module": "finance",
+    "description": "FRED fetcher 테스트 작성 및 BQ 적재 검증",
+    "owner": "codex",
+    "passes": true,
+    "assigned_to": "codex",
+    "depends_on": []
+  },
+  {
+    "id": "fin-02",
+    "module": "finance",
+    "description": "KOSIS 금융 fetcher 테스트 작성 및 BQ 적재 검증",
+    "owner": "codex",
+    "passes": true,
+    "assigned_to": "codex",
+    "depends_on": []
+  },
+  {
+    "id": "fin-03",
+    "module": "finance",
+    "description": "ECOS fetcher 통합 테스트 (M2·환율 item_code 수정 후 진행)",
+    "owner": "codex",
+    "passes": true,
+    "assigned_to": "codex",
+    "depends_on": [
+      "emp-02"
+    ]
+  },
+  {
+    "id": "fin-04",
+    "module": "finance",
+    "description": "BigQuery finance_stats 데이터셋 생성 및 category_key_filter 검증",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": [
+      "fin-01",
+      "fin-02"
+    ]
+  },
+  {
+    "id": "fin-05",
+    "module": "finance",
+    "description": "finance_bq_loader.py 완성 (기존 bq_loader.py 참사용하는 신규)",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": [
+      "fin-04"
+    ]
+  },
+  {
+    "id": "fin-06",
+    "module": "finance",
+    "description": "finance_main.py 작성 후 fetcher 오케스트레이션 + BQ 적재 연결",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": [
+      "fin-03",
+      "fin-05"
+    ]
+  },
+  {
+    "id": "fin-07",
+    "module": "finance",
+    "description": "금융동향 R 분석 모듈 작성 (run_id 환경변수 자동 포함)",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": [
+      "fin-04",
+      "fin-06"
+    ]
+  },
+  {
+    "id": "fin-08",
+    "module": "finance",
+    "description": "report-job Docker 이미지 금융동향 모듈 통합 및 Cloud Run 배포",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": [
+      "fin-07"
+    ]
+  },
+  {
+    "id": "fin-09",
+    "module": "finance",
+    "description": "finance_feature_store.py 작성 — employment feature_store.py 패턴 준용, finance_stats 기반 fs_long/fs_wide 뷰 생성",
+    "owner": "codex",
+    "passes": true,
+    "assigned_to": "codex",
+    "depends_on": [
+      "fin-06"
+    ]
+  },
+  {
+    "id": "fin-10",
+    "module": "finance",
+    "description": "pipeline-job E2E 검증 스크립트 작성 — gcloud run jobs execute 후 finance_stats BQ 테이블 row count 및 최신 period 확인",
+    "owner": "codex",
+    "passes": true,
+    "assigned_to": "codex",
+    "depends_on": [
+      "fin-08"
+    ]
+  },
+  {
+    "id": "fin-11",
+    "module": "finance",
+    "description": "금융동향 Rmd 리포트 작성 — fin_analysis_* BQ 테이블 기반, employment_report.Rmd 패턴 참조, GCS 업로드 포함",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": [
+      "fin-07",
+      "fin-10"
+    ]
+  },
+  {
+    "id": "fix-01",
+    "module": "employment",
+    "description": "Prophet 예측 오류 수정 — 06_forecast.R country_code 인자 미지원 문제, prophet() 호출부 수정 및 회귀 방지 테스트",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "claude",
+    "depends_on": []
+  },
+  {
+    "id": "fe-01",
+    "module": "frontend",
+    "description": "금융동향 핵심지표 UI 컴포넌트 구현 (스켈레톤 먼저, 데이터 바인딩은 fin-04 이후)",
+    "owner": "antigravity",
+    "passes": true,
+    "assigned_to": "antigravity",
+    "depends_on": []
+  },
+  {
+    "id": "fe-02",
+    "module": "frontend",
+    "description": "GCS 배포 후 브라우저 렌더링 검증(차트, 데이터 바인딩)",
+    "owner": "claude",
+    "passes": true,
+    "assigned_to": "antigravity",
+    "depends_on": [
+      "fin-08",
+      "fe-01"
+    ]
+  },
+  {
+    "id": "fe-03",
+    "module": "frontend",
+    "description": "금융동향 차트 섹션 추가 — 금리 추이 라인차트, 한미 금리·CPI 스프레드 시각화 (fin_analysis_kr_us_spread BQ 테이블 기반, data.json 확장 필요)",
+    "owner": "antigravity",
+    "passes": true,
+    "assigned_to": "antigravity",
+    "depends_on": [
+      "fin-10"
+    ]
+  },
+  {
+    "id": "fe-04",
+    "module": "frontend",
+    "description": "모바일 반응형 레이아웃 개선 — 900px 이하 kpi-grid 2열, 차트 높이 조정, 헤더 축약",
+    "owner": "antigravity",
+    "passes": true,
+    "assigned_to": "antigravity",
+    "depends_on": []
+  },
+  {
+    "id": "fe-05",
+    "module": "frontend",
+    "description": "금융 리포트 카드 활성화 — 준비중 상태 해제, data.json finance_report 필드 추가, GCS 리포트 링크 연결",
+    "owner": "antigravity",
+    "passes": true,
+    "assigned_to": "antigravity",
+    "depends_on": [
+      "fin-11"
+    ]
+  }
+]

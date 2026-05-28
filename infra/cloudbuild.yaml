@@ -1,0 +1,102 @@
+# ============================================================================
+# cloudbuild.yaml — 통합 파이프라인 + 리포트 이미지 빌드·푸시
+# 실행: gcloud builds submit --config infra/cloudbuild.yaml .
+# ============================================================================
+
+substitutions:
+  _PROJECT: auto-report-489722
+  _REGION: asia-northeast3
+  _REPO: employment-pipeline
+
+steps:
+  # ── 1. pipeline 이미지 빌드 ───────────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: build-pipeline
+    args:
+      - build
+      - -f
+      - infra/pipeline-job/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/pipeline:latest
+      - -t
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/pipeline:$SHORT_SHA
+      - .
+    waitFor: ['-']   # 즉시 시작
+
+  # ── 2. report 이미지 빌드 ────────────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: build-report
+    args:
+      - build
+      - -f
+      - infra/report-job/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/report:latest
+      - -t
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/report:$SHORT_SHA
+      - .
+    waitFor: ['-']   # pipeline과 병렬 빌드
+
+  # ── 3. pipeline 이미지 푸시 ──────────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: push-pipeline
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/pipeline
+    waitFor: [build-pipeline]
+
+  # ── 4. report 이미지 푸시 ────────────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: push-report
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/report
+    waitFor: [build-report]
+
+  # ── 5. pipeline-job Cloud Run 업데이트 ───────────────────────────────────
+  # 두 이미지 푸시가 모두 완료된 후 배포 (build-report 중간 취소 방지)
+  - name: gcr.io/cloud-builders/gcloud
+    id: deploy-pipeline-job
+    args:
+      - run
+      - jobs
+      - update
+      - pipeline-job
+      - --image
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/pipeline:latest
+      - --region
+      - ${_REGION}
+      - --project
+      - ${_PROJECT}
+    waitFor: [push-pipeline, push-report]
+
+  # ── 6. report-job Cloud Run 업데이트 ─────────────────────────────────────
+  - name: gcr.io/cloud-builders/gcloud
+    id: deploy-report-job
+    args:
+      - run
+      - jobs
+      - update
+      - report-job
+      - --image
+      - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/report:latest
+      - --region
+      - ${_REGION}
+      - --project
+      - ${_PROJECT}
+    waitFor: [push-pipeline, push-report]
+
+images:
+  - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/pipeline:latest
+  - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/pipeline:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/report:latest
+  - ${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/report:$SHORT_SHA
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+# report 이미지(rocker/verse)는 빌드가 오래 걸림 — 타임아웃 60분
+timeout: 3600s
